@@ -1,58 +1,57 @@
-import random
+from Crypto.PublicKey import RSA
+from Crypto.Cipher import PKCS1_OAEP
+from Crypto.Random import get_random_bytes
+import os
 
-def invmod(a, m):
-    g, x, y = extended_gcd(a, m)
-    if g != 1:
-        raise ValueError("Modular inverse does not exist")
-    return x % m
+print("Generating 2048-bit RSA key pair for Bob (Receiver)...")
+bob_key = RSA.generate(2048, e=65537)   # 2048-bit key, fixed e=65537
 
-def extended_gcd(a, b):
-    if b == 0:
-        return (a, 1, 0)
-    else:
-        g, x1, y1 = extended_gcd(b, a % b)
-        return (g, y1, x1 - (a // b) * y1)
+bob_public_key = bob_key.publickey()
+bob_private_key = bob_key
 
-def rsa_encrypt(message_int, e, n):
-    return pow(message_int, e, n)
+print(f"n (modulus) has {bob_key.n.bit_length()} bits")
+print(f"Public exponent e = {bob_key.e}\n")
 
-def rsa_decrypt(cipher_int, d, n):
-    return pow(cipher_int, d, n)
+print("Alice generates a 256-bit AES key and encrypts it for Bob...")
 
-def bytes_to_int(b):
-    return int.from_bytes(b, byteorder='big')
+aes_key = get_random_bytes(32)  
+print(f"Original AES Key (hex): {aes_key.hex()}")
 
-def int_to_bytes(i, length):
-    return i.to_bytes(length, byteorder='big')
+encryptor = PKCS1_OAEP.new(bob_public_key)
+encrypted_aes_key = encryptor.encrypt(aes_key)
 
-def simulate_rsa_key_exchange():
-    e = 65537
-    p = 2957
-    q = 3557
-    n = p * q
-    phi = (p - 1) * (q - 1)
-    d = invmod(e, phi)
+print(f"Encrypted AES Key (hex): {encrypted_aes_key.hex()[:120]}... ({len(encrypted_aes_key)} bytes total)\n")
 
-    print(f"RSA Public Key (n, e): ({n}, {e})")
-    print(f"RSA Private Key (d): {d}")
+print("Bob's private key uses CRT optimization with these parameters:")
+print(f"  p = {bob_private_key.p}")
+print(f"  q = {bob_private_key.q}")
+print(f"  dP = d mod (p-1) = {bob_private_key.invq}")  
+print(f"  dQ = d mod (q-1) = {bob_private_key.invp}")  
+print(f"  qInv = q^{-1} mod p = {bob_private_key.invq}\n")
 
-    aes_key = b'ThisIs32ByteLongAESKeyForDemo!'  # 32 bytes = 256-bit key
-    print("\nOriginal AES Key:", aes_key.hex())
+decryptor = PKCS1_OAEP.new(bob_private_key)  
+decrypted_aes_key = decryptor.decrypt(encrypted_aes_key)
 
-    key_int = bytes_to_int(aes_key)
+print(f"Decrypted AES Key (hex): {decrypted_aes_key.hex()}")
 
-    encrypted_key_int = rsa_encrypt(key_int, e, n)
-    print("Encrypted AES Key (int):", encrypted_key_int)
+if decrypted_aes_key == aes_key:
+    print("\nAES key successfully exchanged using secure RSA")
+    print("Bob can use this shared AES key for symmetric encryption.")
+else:
+    print("\nKey mismatch!")
 
-    decrypted_key_int = rsa_decrypt(encrypted_key_int, d, n)
+import time
 
-    decrypted_aes_key = int_to_bytes(decrypted_key_int, len(aes_key))
-    print("Decrypted AES Key:", decrypted_aes_key.hex())
+ciphertext_int = int.from_bytes(encrypted_aes_key, 'big')
 
-    if decrypted_aes_key == aes_key:
-        print("Success: AES key correctly retrieved via RSA key exchange!")
-    else:
-        print("Failure: Decrypted key does not match original AES key.")
+start = time.time()
+for _ in range(100):
+    _ = pow(ciphertext_int, bob_private_key.d, bob_private_key.n)  # Standard (slow)
+end = time.time()
+print(f"\nStandard RSA decryption: {(end-start)*1000:.2f} ms")
 
-simulate_rsa_key_exchange()
-
+start = time.time()
+for _ in range(100):
+    _ = PKCS1_OAEP.new(bob_private_key).decrypt(encrypted_aes_key)  # Uses CRT
+end = time.time()
+print(f"CRT optimized RSA decryption: {(end-start)*1000:.2f} ms")
