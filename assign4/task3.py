@@ -4,7 +4,7 @@ from Crypto.Random import get_random_bytes
 import os
 
 print("Generating 2048-bit RSA key pair for Bob (Receiver)...")
-bob_key = RSA.generate(2048, e=65537)   # 2048-bit key, fixed e=65537
+bob_key = RSA.generate(2048, e=65537)   
 
 bob_public_key = bob_key.publickey()
 bob_private_key = bob_key
