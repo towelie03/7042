@@ -1,13 +1,12 @@
 # task2.py
-# Your original AES-256-CBC + BBS implementation, unchanged logic
-# Now wrapped in a clean class: Task2
-
 import math
 import random
 import os
-
+import secrets
+from time import time
 
 class Task2:
+
     Nb = 4
     Nk = 8
     Nr = 14
@@ -31,12 +30,16 @@ class Task2:
         0x8c,0xa1,0x89,0x0d,0xbf,0xe6,0x42,0x68,0x41,0x99,0x2d,0x0f,0xb0,0x54,0xbb,0x16
     ]
 
-    Rcon = [0x01000000, 0x02000000, 0x04000000, 0x08000000, 0x10000000,
-            0x20000000, 0x40000000, 0x80000000, 0x1B000000, 0x36000000]
-
     inv_sbox = [0] * 256
     for i in range(256):
         inv_sbox[sbox[i]] = i
+
+    Rcon = [
+        0x01000000,0x02000000,0x04000000,0x08000000,
+        0x10000000,0x20000000,0x40000000,0x80000000,
+        0x1B000000,0x36000000
+    ]
+
 
     @staticmethod
     def mul(a, b):
@@ -50,33 +53,41 @@ class Task2:
             b >>= 1
         return p & 0xFF
 
-    @staticmethod
-    def sub_word(w):
-        return (Task2.sbox[(w >> 24) & 0xFF] << 24) | \
-               (Task2.sbox[(w >> 16) & 0xFF] << 16) | \
-               (Task2.sbox[(w >> 8)  & 0xFF] << 8)  | \
-               Task2.sbox[w & 0xFF]
+    @classmethod
+    def sub_word(cls, w):
+        return (
+            cls.sbox[(w >> 24) & 0xFF] << 24 |
+            cls.sbox[(w >> 16) & 0xFF] << 16 |
+            cls.sbox[(w >> 8)  & 0xFF] << 8  |
+            cls.sbox[w & 0xFF]
+        )
 
     @staticmethod
     def rot_word(w):
         return ((w << 8) & 0xFFFFFFFF) | (w >> 24)
 
-    @staticmethod
-    def key_expansion(key):
-        w = [0] * (4 * (Task2.Nr + 1))
-        for i in range(Task2.Nk):
-            w[i] = (key[4*i] << 24) | (key[4*i+1] << 16) | (key[4*i+2] << 8) | key[4*i+3]
+    @classmethod
+    def key_expansion(cls, key_bytes):
+        w = [0] * (4 * (cls.Nr + 1))
 
-        for i in range(Task2.Nk, 4*(Task2.Nr+1)):
+        for i in range(cls.Nk):
+            w[i] = (
+                (key_bytes[4*i] << 24) |
+                (key_bytes[4*i+1] << 16) |
+                (key_bytes[4*i+2] << 8) |
+                key_bytes[4*i+3]
+            )
+
+        for i in range(cls.Nk, 4*(cls.Nr+1)):
             temp = w[i-1]
-            if i % Task2.Nk == 0:
-                temp = Task2.sub_word(Task2.rot_word(temp)) ^ Task2.Rcon[i//Task2.Nk - 1]
-            elif Task2.Nk > 6 and i % Task2.Nk == 4:
-                temp = Task2.sub_word(temp)
-            w[i] = w[i - Task2.Nk] ^ temp
+            if i % cls.Nk == 0:
+                temp = cls.sub_word(cls.rot_word(temp)) ^ cls.Rcon[i//cls.Nk - 1]
+            elif cls.Nk > 6 and i % cls.Nk == 4:
+                temp = cls.sub_word(temp)
+            w[i] = w[i - cls.Nk] ^ temp
 
         round_keys = []
-        for i in range(Task2.Nr + 1):
+        for i in range(cls.Nr + 1):
             rk = [[0]*4 for _ in range(4)]
             for j in range(4):
                 word = w[i*4 + j]
@@ -87,60 +98,6 @@ class Task2:
             round_keys.append(rk)
         return round_keys
 
-    @staticmethod
-    def sub_bytes(state):
-        for i in range(4):
-            for j in range(4):
-                state[i][j] = Task2.sbox[state[i][j]]
-        return state
-
-    @staticmethod
-    def inv_sub_bytes(state):
-        for i in range(4):
-            for j in range(4):
-                state[i][j] = Task2.inv_sbox[state[i][j]]
-        return state
-
-    @staticmethod
-    def shift_rows(state):
-        state[1] = state[1][1:] + state[1][:1]
-        state[2] = state[2][2:] + state[2][:2]
-        state[3] = state[3][3:] + state[3][:3]
-        return state
-
-    @staticmethod
-    def inv_shift_rows(state):
-        state[1] = state[1][-1:] + state[1][:-1]
-        state[2] = state[2][-2:] + state[2][:-2]
-        state[3] = state[3][-3:] + state[3][:-3]
-        return state
-
-    @staticmethod
-    def mix_columns(state):
-        for i in range(4):
-            a = [state[r][i] for r in range(4)]
-            state[0][i] = Task2.mul(2, a[0]) ^ Task2.mul(3, a[1]) ^ a[2] ^ a[3]
-            state[1][i] = a[0] ^ Task2.mul(2, a[1]) ^ Task2.mul(3, a[2]) ^ a[3]
-            state[2][i] = a[0] ^ a[1] ^ Task2.mul(2, a[2]) ^ Task2.mul(3, a[3])
-            state[3][i] = Task2.mul(3, a[0]) ^ a[1] ^ a[2] ^ Task2.mul(2, a[3])
-        return state
-
-    @staticmethod
-    def inv_mix_columns(state):
-        for i in range(4):
-            a = [state[r][i] for r in range(4)]
-            state[0][i] = Task2.mul(0x0e, a[0]) ^ Task2.mul(0x0b, a[1]) ^ Task2.mul(0x0d, a[2]) ^ Task2.mul(0x09, a[3])
-            state[1][i] = Task2.mul(0x09, a[0]) ^ Task2.mul(0x0e, a[1]) ^ Task2.mul(0x0b, a[2]) ^ Task2.mul(0x0d, a[3])
-            state[2][i] = Task2.mul(0x0d, a[0]) ^ Task2.mul(0x09, a[1]) ^ Task2.mul(0x0e, a[2]) ^ Task2.mul(0x0b, a[3])
-            state[3][i] = Task2.mul(0x0b, a[0]) ^ Task2.mul(0x0d, a[1]) ^ Task2.mul(0x09, a[2]) ^ Task2.mul(0x0e, a[3])
-        return state
-
-    @staticmethod
-    def add_round_key(state, round_key):
-        for i in range(4):
-            for j in range(4):
-                state[i][j] ^= round_key[i][j]
-        return state
 
     @staticmethod
     def bytes2matrix(text):
@@ -150,114 +107,191 @@ class Task2:
     def matrix2bytes(matrix):
         return bytes(matrix[r][c] for r in range(4) for c in range(4))
 
-    @staticmethod
-    def encrypt_block(plaintext, round_keys):
-        state = Task2.bytes2matrix(plaintext)
-        Task2.add_round_key(state, round_keys[0])
-        for round_ in range(1, Task2.Nr):
-            Task2.sub_bytes(state)
-            Task2.shift_rows(state)
-            Task2.mix_columns(state)
-            Task2.add_round_key(state, round_keys[round_])
-        Task2.sub_bytes(state)
-        Task2.shift_rows(state)
-        Task2.add_round_key(state, round_keys[Task2.Nr])
-        return Task2.matrix2bytes(state)
+
+    @classmethod
+    def encrypt_block(cls, plaintext, round_keys):
+        state = cls.bytes2matrix(plaintext)
+        cls.add_round_key(state, round_keys[0])
+
+        for rnd in range(1, cls.Nr):
+            cls.sub_bytes(state)
+            cls.shift_rows(state)
+            cls.mix_columns(state)
+            cls.add_round_key(state, round_keys[rnd])
+
+        cls.sub_bytes(state)
+        cls.shift_rows(state)
+        cls.add_round_key(state, round_keys[cls.Nr])
+
+        return cls.matrix2bytes(state)
+
+    @classmethod
+    def decrypt_block(cls, ciphertext, round_keys):
+        state = cls.bytes2matrix(ciphertext)
+        cls.add_round_key(state, round_keys[cls.Nr])
+        cls.inv_shift_rows(state)
+        cls.inv_sub_bytes(state)
+
+        for rnd in range(cls.Nr-1, 0, -1):
+            cls.add_round_key(state, round_keys[rnd])
+            cls.inv_mix_columns(state)
+            cls.inv_shift_rows(state)
+            cls.inv_sub_bytes(state)
+
+        cls.add_round_key(state, round_keys[0])
+        return cls.matrix2bytes(state)
+
+
+    @classmethod
+    def sub_bytes(cls, state):
+        for i in range(4):
+            for j in range(4):
+                state[i][j] = cls.sbox[state[i][j]]
+
+    @classmethod
+    def inv_sub_bytes(cls, state):
+        for i in range(4):
+            for j in range(4):
+                state[i][j] = cls.inv_sbox[state[i][j]]
 
     @staticmethod
-    def decrypt_block(ciphertext, round_keys):
-        state = Task2.bytes2matrix(ciphertext)
-        Task2.add_round_key(state, round_keys[Task2.Nr])
-        Task2.inv_shift_rows(state)
-        Task2.inv_sub_bytes(state)
-        for round_ in range(Task2.Nr-1, 0, -1):
-            Task2.add_round_key(state, round_keys[round_])
-            Task2.inv_mix_columns(state)
-            Task2.inv_shift_rows(state)
-            Task2.inv_sub_bytes(state)
-        Task2.add_round_key(state, round_keys[0])
-        return Task2.matrix2bytes(state)
+    def shift_rows(state):
+        state[1] = state[1][1:] + state[1][:1]
+        state[2] = state[2][2:] + state[2][:2]
+        state[3] = state[3][3:] + state[3][:3]
 
     @staticmethod
-    def pad(plaintext):
-        padding_len = 16 - (len(plaintext) % 16)
-        return plaintext + bytes([padding_len] * padding_len)
+    def inv_shift_rows(state):
+        state[1] = state[1][-1:] + state[1][:-1]
+        state[2] = state[2][-2:] + state[2][:-2]
+        state[3] = state[3][-3:] + state[3][:-3]
+
+    @classmethod
+    def mix_columns(cls, state):
+        for i in range(4):
+            a = [state[r][i] for r in range(4)]
+            state[0][i] = cls.mul(2,a[0]) ^ cls.mul(3,a[1]) ^ a[2] ^ a[3]
+            state[1][i] = a[0] ^ cls.mul(2,a[1]) ^ cls.mul(3,a[2]) ^ a[3]
+            state[2][i] = a[0] ^ a[1] ^ cls.mul(2,a[2]) ^ cls.mul(3,a[3])
+            state[3][i] = cls.mul(3,a[0]) ^ a[1] ^ a[2] ^ cls.mul(2,a[3])
+
+    @classmethod
+    def inv_mix_columns(cls, state):
+        for i in range(4):
+            a = [state[r][i] for r in range(4)]
+            state[0][i] = cls.mul(0x0e,a[0]) ^ cls.mul(0x0b,a[1]) ^ cls.mul(0x0d,a[2]) ^ cls.mul(0x09,a[3])
+            state[1][i] = cls.mul(0x09,a[0]) ^ cls.mul(0x0e,a[1]) ^ cls.mul(0x0b,a[2]) ^ cls.mul(0x0d,a[3])
+            state[2][i] = cls.mul(0x0d,a[0]) ^ cls.mul(0x09,a[1]) ^ cls.mul(0x0e,a[2]) ^ cls.mul(0x0b,a[3])
+            state[3][i] = cls.mul(0x0b,a[0]) ^ cls.mul(0x0d,a[1]) ^ cls.mul(0x09,a[2]) ^ cls.mul(0x0e,a[3])
 
     @staticmethod
-    def unpad(padded):
-        padding_len = padded[-1]
-        if padding_len < 1 or padding_len > 16:
-            return padded
-        return padded[:-padding_len]
+    def add_round_key(state, round_key):
+        for i in range(4):
+            for j in range(4):
+                state[i][j] ^= round_key[i][j]
 
-    @staticmethod
-    def aes_cbc_encrypt(plaintext_bytes, key, iv):
-        plaintext_bytes = Task2.pad(plaintext_bytes)
-        round_keys = Task2.key_expansion(key)
+
+    @classmethod
+    def pad(cls, plaintext):
+        pad_len = 16 - (len(plaintext) % 16)
+        return plaintext + bytes([pad_len] * pad_len)
+
+    @classmethod
+    def unpad(cls, padded):
+        pad_len = padded[-1]
+        if 1 <= pad_len <= 16:
+            return padded[:-pad_len]
+        return padded
+
+    @classmethod
+    def aes_cbc_encrypt(cls, plaintext, key, iv):
+        plaintext = cls.pad(plaintext)
+        round_keys = cls.key_expansion(key)
         ciphertext = b""
         prev = iv
-        for i in range(0, len(plaintext_bytes), 16):
-            block = plaintext_bytes[i:i+16]
-            block = bytes(a ^ b for a, b in zip(block, prev))
-            encrypted = Task2.encrypt_block(block, round_keys)
-            ciphertext += encrypted
-            prev = encrypted
+
+        for i in range(0, len(plaintext), 16):
+            block = plaintext[i:i+16]
+            block = bytes(a ^ b for a,b in zip(block, prev))
+            enc = cls.encrypt_block(block, round_keys)
+            ciphertext += enc
+            prev = enc
+
         return ciphertext
 
-    @staticmethod
-    def aes_cbc_decrypt(ciphertext, key, iv):
-        round_keys = Task2.key_expansion(key)
+    @classmethod
+    def aes_cbc_decrypt(cls, ciphertext, key, iv):
+        round_keys = cls.key_expansion(key)
         plaintext = b""
         prev = iv
+
         for i in range(0, len(ciphertext), 16):
             block = ciphertext[i:i+16]
-            decrypted = Task2.decrypt_block(block, round_keys)
-            decrypted = bytes(a ^ b for a, b in zip(decrypted, prev))
-            plaintext += decrypted
+            dec = cls.decrypt_block(block, round_keys)
+            dec = bytes(a ^ b for a,b in zip(dec, prev))
+            plaintext += dec
             prev = block
-        return Task2.unpad(plaintext)
+
+        return cls.unpad(plaintext)
+
 
     @staticmethod
-    def generate_aes_key_bbs(bits=256):
-        def gen_3mod4(bitlen):
-            while True:
-                r = random.getrandbits(bitlen) | 1
-                r |= (1 << (bitlen - 1))
-                if r % 4 == 3 and r > 1000:
-                    return r
-        p = gen_3mod4(bits // 2 + 8)
-        q = gen_3mod4(bits // 2 + 8)
-        while p == q:
-            q = gen_3mod4(bits // 2 + 8)
-        n, x = Task2._bbs_init(p, q)
-        key_bits, _ = Task2._bbs_bits(n, x, bits)
-        return Task2._bits_to_bytes(key_bits[:bits])
-
-    # Internal BBS helpers
-    @staticmethod
-    def _bbs_init(p, q, seed=None):
-        assert p % 4 == 3 and q % 4 == 3
-        n = p * q
-        if seed is None:
-            while True:
-                seed = random.randrange(2, n - 1)
-                if math.gcd(seed, n) == 1:
+    def is_probable_prime(n, k=20):
+        if n < 2:
+            return False
+        small_primes = [2,3,5,7,11,13,17,19,23,29,31]
+        for p in small_primes:
+            if n % p == 0:
+                return n == p
+        d = n - 1
+        s = 0
+        while d % 2 == 0:
+            d //= 2
+            s += 1
+        for _ in range(k):
+            a = secrets.randbelow(n - 3) + 2
+            x = pow(a, d, n)
+            if x == 1 or x == n - 1:
+                continue
+            for __ in range(s - 1):
+                x = pow(x, 2, n)
+                if x == n - 1:
                     break
+            else:
+                return False
+        return True
+
+    @staticmethod
+    def gen_prime_3mod4(bits):
+        while True:
+            r = random.getrandbits(bits) | 1 | (1 << (bits - 1))
+            if r % 4 != 3:
+                continue
+            if Task2.is_probable_prime(r, k=20):
+                return r
+
+    @classmethod
+    def _bbs_init(cls, p, q):
+        n = p * q
+        while True:
+            seed = random.randint(2, n-1)
+            if math.gcd(seed, n) == 1:
+                break
         x = pow(seed, 2, n)
         return n, x
 
-    @staticmethod
-    def _bbs_next_bit(x, n):
+    @classmethod
+    def _bbs_next_bit(cls, x, n):
         x = pow(x, 2, n)
         return x & 1, x
 
-    @staticmethod
-    def _bbs_bits(n, x, k):
-        bits = []
+    @classmethod
+    def _bbs_bits(cls, n, x, k):
+        out = []
         for _ in range(k):
-            bit, x = Task2._bbs_next_bit(x, n)
-            bits.append(bit)
-        return bits, x
+            bit, x = cls._bbs_next_bit(x, n)
+            out.append(bit)
+        return out, x
 
     @staticmethod
     def _bits_to_bytes(bits):
@@ -265,32 +299,122 @@ class Task2:
         for i in range(0, len(bits), 8):
             byte = 0
             for j in range(8):
-                if i + j < len(bits):
-                    byte = (byte << 1) | bits[i + j]
+                if i+j < len(bits):
+                    byte = (byte<<1) | bits[i+j]
             b.append(byte)
         return bytes(b)
 
+    @classmethod
+    def generate_aes_key_bbs(cls, bits=256):
+        p = cls.gen_prime_3mod4(bits//2 + 8)
+        q = cls.gen_prime_3mod4(bits//2 + 8)
+        while p == q:
+            q = cls.gen_prime_3mod4(bits//2 + 8)
+
+        n, x = cls._bbs_init(p, q)
+        key_bits, _ = cls._bbs_bits(n, x, bits)
+        return cls._bits_to_bytes(key_bits[:bits])
+
+
+    @staticmethod
+    def egcd(a, b):
+        x0, x1, y0, y1 = 1, 0, 0, 1
+        while b != 0:
+            q = a // b
+            a, b = b, a % b
+            x0, x1 = x1, x0 - q * x1
+            y0, y1 = y1, y0 - q * y1
+        return a, x0, y0
+
+    @staticmethod
+    def modinv(a, m):
+        g, x, _ = Task2.egcd(a, m)
+        if g != 1:
+            raise ValueError("No modular inverse")
+        return x % m
+
+    @classmethod
+    def generate_rsa_keypair(cls, bits=1024):
+        half = bits // 2
+        p = cls.gen_prime_3mod4(half)
+        q = cls.gen_prime_3mod4(half)
+        while q == p:
+            q = cls.gen_prime_3mod4(half)
+
+        n = p * q
+        phi = (p - 1) * (q - 1)
+        e = 65537
+        if math.gcd(e, phi) != 1:
+            return cls.generate_rsa_keypair(bits)
+        d = cls.modinv(e, phi)
+        return (n, e), (n, d, p, q)
+
+    @staticmethod
+    def rsa_encrypt(m, pubkey):
+        n, e = pubkey
+        return pow(m, e, n)
+
+    @staticmethod
+    def rsa_decrypt_standard(c, privkey):
+        n, d, p, q = privkey
+        return pow(c, d, n)
+
+    @staticmethod
+    def rsa_decrypt_crt(c, privkey):
+        n, d, p, q = privkey
+        dp = d % (p - 1)
+        dq = d % (q - 1)
+        qinv = Task2.modinv(q, p)
+        m1 = pow(c % p, dp, p)
+        m2 = pow(c % q, dq, q)
+        h = (qinv * (m1 - m2)) % p
+        m = (m2 + h * q) % n
+        return m
+
+    @classmethod
+    def rsa_decrypt_comparison(cls):
+        import time
+        print("\n=== RSA CRT Speed Comparison ===\n")
+        pubkey, privkey = cls.generate_rsa_keypair(1024)
+        n, e = pubkey
+        message = random.randint(2, n - 1)
+        c = cls.rsa_encrypt(message, pubkey)
+        t1 = time.time()
+        m1 = cls.rsa_decrypt_standard(c, privkey)
+        t2 = time.time()
+        t3 = time.time()
+        m2 = cls.rsa_decrypt_crt(c, privkey)
+        t4 = time.time()
+        print(f"Standard RSA decrypt: {t2 - t1:.6f} seconds")
+        print(f"CRT RSA decrypt:      {t4 - t3:.6f} seconds")
+        speedup = (t2 - t1) / (t4 - t3) if (t4 - t3) > 0 else float('inf')
+        print(f"\nSpeedup: {speedup:.2f}x faster using CRT\n")
+        if m1 == m2 == message:
+            print("Correctness: PASS")
+        else:
+            print("Correctness: FAIL")
+            print("message:", message)
+            print("standard:", m1)
+            print("crt     :", m2)
+
+
+    def run(self):
+        print("=== TASK 2: AES-256 CBC with BBS Key Gen ===\n")
+        key = self.generate_aes_key_bbs(256)
+        iv = os.urandom(16)
+        print(f"AES-256 Key (BBS): {key.hex()}")
+        print(f"IV: {iv.hex()}\n")
+        message = input("Enter your secret message: ")
+        plaintext = message.encode()
+        ciphertext = self.aes_cbc_encrypt(plaintext, key, iv)
+        print(f"\nCiphertext (hex): {ciphertext.hex()}\n")
+        decrypted = self.aes_cbc_decrypt(ciphertext, key, iv)
+        print(f"Decrypted: {decrypted.decode()}")
+        print("\nEncrypt/decrypt success!" if decrypted == plaintext else "\nFAILED")
+        print("\n\n=== NOW TESTING RSA WITH AND WITHOUT CRT ===")
+        self.rsa_decrypt_comparison()
+
 
 if __name__ == "__main__":
-    print("AES256 CBC with BBS Key Gen")
-    
-    key = Task2.generate_aes_key_bbs(256)
-    print(f"Generated 256 bit AES Key (BBS): {key.hex()}")
-    
-    iv = os.urandom(16)
-    print(f"Random IV: {iv.hex()}\n")
-    
-    message = input("Enter your secret message: ")
-    plaintext = message.encode('utf-8')
-    print(f"\nPlaintext: {message}\n")
-    
-    ciphertext = Task2.aes_cbc_encrypt(plaintext, key, iv)
-    print(f"Ciphertext (hex): {ciphertext.hex()}\n")
-    
-    decrypted = Task2.aes_cbc_decrypt(ciphertext, key, iv)
-    print(f"Decrypted: {decrypted.decode('utf-8')}")
-    
-    if decrypted == plaintext:
-        print("\nEncrypt and decrypt success")
-    else:
-        print("\nFailed")
+    Task2().run()
+
