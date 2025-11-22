@@ -1,7 +1,10 @@
 import os
+import hashlib
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
 from task2 import Task2
+from PIL import Image
+import io
 
 
 def generate_rsa_keypair():
@@ -24,6 +27,7 @@ def encrypt_image_file(image_path, aes_key):
         plaintext = f.read()
 
     iv = os.urandom(16)
+
     ciphertext = Task2.aes_cbc_encrypt(plaintext, aes_key, iv)
 
     encrypted_path = "encrypted_image.bin"
@@ -50,42 +54,57 @@ def decrypt_image_file(encrypted_path, aes_key):
 
 
 def main():
-    image_path="./banana_fish.png"
-    print("task4 - Image Encryption Using AES")
+    image_path = "./banana_fish.png"
+    print("TASK 4: Image Encryption Using AES-256 CBC (BBS Key)\n")
 
     if not os.path.exists(image_path):
-        print(f"Error: Image not found: {image_path}")
-        print("Please make sure the file exists and path is correct.")
+        print(f"ERROR: Image not found at path: {image_path}")
         return
 
     bob_private_key, bob_public_key = generate_rsa_keypair()
-    print(f"Bob generated 2048-bit RSA key (n = {bob_private_key.n.bit_length()} bits)")
+    print(f"Bob generated 2048-bit RSA key (modulus = {bob_private_key.n.bit_length()} bits)\n")
 
-    print("\nAlice generating 256-bit AES key using Blum-Blum-Shub PRNG...")
+    print("Alice generating 256-bit AES key using Blum-Blum-Shub PRNG...")
     aes_key = Task2.generate_aes_key_bbs()
-    print(f"AES Key: {aes_key.hex()}")
+    print(f"AES Key: {aes_key.hex()}\n")
 
-    print("\nAlice encrypting AES key with Bob's public key (RSA-OAEP)...")
+    print("Alice encrypting AES key with Bob’s RSA public key (OAEP)...")
     encrypted_key = rsa_encrypt_aes_key(bob_public_key, aes_key)
+
     received_key = rsa_decrypt_aes_key(bob_private_key, encrypted_key)
-    print(f"Bob recovered key: {'Success' if received_key == aes_key else 'Failed'}")
+    print(f"Bob recovered key: {'SUCCESS' if received_key == aes_key else 'FAILED'}\n")
 
-    print(f"\nAlice encrypting image: {image_path}")
+    print(f"Alice encrypting image: {image_path}")
     encrypted_file, iv, size = encrypt_image_file(image_path, received_key)
-    print(f"Encrypted = {encrypted_file} ({size:,} bytes)")
+    print(f"Encrypted image saved as: {encrypted_file} ({size:,} bytes)\n")
 
-    print(f"\nBob decrypting {encrypted_file}...")
-    decrypted_file, decrypted_data = decrypt_image_file(encrypted_file, received_key)
-    print(f"Decrypted = {decrypted_file}")
+    print(f"Bob decrypting {encrypted_file}...")
+    decrypted_file, decrypted_bytes = decrypt_image_file(encrypted_file, received_key)
+    print(f"Decrypted image saved as: {decrypted_file}\n")
 
     with open(image_path, "rb") as f:
         original_data = f.read()
 
-    if decrypted_data == original_data:
-        print("Image decrypted")
+    original_hash = hashlib.sha256(original_data).hexdigest()
+    decrypted_hash = hashlib.sha256(decrypted_bytes).hexdigest()
+
+    print("Image Integrity Check:")
+    print(f"Original SHA-256 : {original_hash}")
+    print(f"Decrypted SHA-256: {decrypted_hash}")
+
+    if decrypted_hash == original_hash:
+        print("\nImage decrypted successfully and matches the original")
     else:
-        print("Decryption failed")
+        print("\nDecrypted image does NOT match the original")
+
+    try:
+        img = Image.open(io.BytesIO(decrypted_bytes))
+        img.show()
+        print("\n(Displayed decrypted image successfully.)")
+    except Exception as e:
+        print(f"\nCould not display image: {e}")
 
 
 if __name__ == "__main__":
     main()
+
